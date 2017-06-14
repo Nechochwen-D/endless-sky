@@ -45,6 +45,34 @@ namespace {
 		return false;
 	}
 	
+	bool SetsIntersect(const set<string> &a, const set<string> &b, const set<string> &c)
+	{
+		auto ait = a.begin();
+		auto bit = b.begin();
+		auto cit = c.begin();
+		while(ait != a.end() && bit != b.end())
+		{
+			int comp = ait->compare(*bit);
+			if(!comp)
+			{
+				while(cit != c.end())
+				{
+					int exclude = ait->compare(*cit);
+					if(!exclude)
+						return false;
+					else
+						++cit;
+				}
+				return true;
+			}
+			else if(comp < 0)
+				++ait;
+			else
+				++bit;
+		}
+		return false;
+	}
+	
 	// Check if the given system is within the given distance of the center.
 	int Distance(const System *center, const System *system, int maximum)
 	{
@@ -96,23 +124,55 @@ void LocationFilter::Load(const DataNode &node)
 		}
 		else if(child.Token(0) == "government")
 		{
+			governmentsExclude.push_back(set<string>());
 			for(int i = 1; i < child.Size(); ++i)
-				governments.insert(GameData::Governments().Get(child.Token(i)));
+			{
+				if(child.Token(i).at(0) != '!')
+					governments.insert(GameData::Governments().Get(child.Token(i)));
+				else
+				//	governmentsExclude.back().insert(GameData::Governments().Get(child.Token(i).substr(1)));
+					governmentsExclude.back().insert(child.Token(i).substr(1));
+			}
 			for(const DataNode &grand : child)
+			{
 				for(int i = 0; i < grand.Size(); ++i)
-					governments.insert(GameData::Governments().Get(grand.Token(i)));
+				{
+					if(grand.Token(i).at(0) != '!')
+						governments.insert(GameData::Governments().Get(grand.Token(i)));
+					else
+					//	governmentsExclude.back().insert(GameData::Governments().Get(grand.Token(i).substr(1)));
+						governmentsExclude.back().insert(grand.Token(i).substr(1));
+				}
+			}
 		}
 		else if(child.Token(0) == "attributes")
 		{
 			attributes.push_back(set<string>());
+			attributesExclude.push_back(set<string>());
 			for(int i = 1; i < child.Size(); ++i)
-				attributes.back().insert(child.Token(i));
+			{
+				if(child.Token(i).at(0) != '!')
+					attributes.back().insert(child.Token(i));
+				else
+					attributesExclude.back().insert(child.Token(i).substr(1));
+			}
 			for(const DataNode &grand : child)
+			{
 				for(int i = 0; i < grand.Size(); ++i)
-					attributes.back().insert(grand.Token(i));
-			// Don't allow empty attribute sets; that's probably a typo.
+				{
+					if(grand.Token(i).at(0) != '!')
+						attributes.back().insert(grand.Token(i));
+					else
+						attributesExclude.back().insert(grand.Token(i).substr(1));
+				}
+			}
+			// Don't allow empty attribute or exclusion sets; that's probably a typo.
+			if(governmentsExclude.back().empty())
+				governmentsExclude.pop_back();
 			if(attributes.back().empty())
 				attributes.pop_back();
+			if(attributesExclude.back().empty())
+				attributesExclude.pop_back();
 		}
 		else if(child.Token(0) == "near" && child.Size() >= 2)
 		{
@@ -174,6 +234,15 @@ void LocationFilter::Save(DataWriter &out) const
 			}
 			out.EndChild();
 		}
+		for(const auto &it : governmentsExclude)
+		{
+			out.Write("government");
+			out.BeginChild();
+			{
+				for(const string &name : it)
+				out.Write("!" + name);
+			}
+		}
 		for(const auto &it : attributes)
 		{
 			out.Write("attributes");
@@ -181,6 +250,16 @@ void LocationFilter::Save(DataWriter &out) const
 			{
 				for(const string &name : it)
 					out.Write(name);
+			}
+			out.EndChild();
+		}
+		for(const auto &it : attributesExclude)
+		{
+			out.Write("attributes");
+			out.BeginChild();
+			{
+				for(const string &name : it)
+					out.Write("!" + name);
 			}
 			out.EndChild();
 		}
@@ -195,8 +274,8 @@ void LocationFilter::Save(DataWriter &out) const
 // Check if this filter contains any specifications.
 bool LocationFilter::IsEmpty() const
 {
-	return planets.empty() && attributes.empty() && systems.empty() && governments.empty()
-		&& !center && originMaxDistance < 0;
+	return planets.empty() && attributes.empty() && attributesExclude.empty() && systems.empty()
+		&& governments.empty() && governmentsExclude.empty() && !center && originMaxDistance < 0;
 }
 
 
@@ -210,7 +289,11 @@ bool LocationFilter::Matches(const Planet *planet, const System *origin) const
 	if(!planets.empty() && !planets.count(planet))
 		return false;
 	for(const set<string> &attr : attributes)
-		if(!SetsIntersect(attr, planet->Attributes()))
+		for(const set<string> &attrE : attributesExclude)
+			if(!SetsIntersect(attr, planet->Attributes(), attrE))
+				return false;
+	for(const set<string> &attrE : attributesExclude)
+		if(SetsIntersect(attrE, planet->Attributes()))
 			return false;
 	
 	return Matches(planet->GetSystem(), origin);
@@ -224,6 +307,9 @@ bool LocationFilter::Matches(const System *system, const System *origin) const
 		return false;
 	if(!systems.empty() && !systems.count(system))
 		return false;
+	for(const set<string> &govE : governmentsExclude)
+		if(govE.count(system->GetGovernment()->GetName()))
+			return false;
 	if(!governments.empty() && !governments.count(system->GetGovernment()))
 		return false;
 	
@@ -251,6 +337,9 @@ bool LocationFilter::Matches(const Ship &ship) const
 {
 	if(!systems.empty() && !systems.count(ship.GetSystem()))
 		return false;
+	for(const set<string> &govE : governmentsExclude)
+		if(govE.count(ship.GetGovernment()->GetName()))
+			return false;
 	if(!governments.empty() && !governments.count(ship.GetGovernment()))
 		return false;
 	
