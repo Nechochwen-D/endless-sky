@@ -20,6 +20,7 @@ PARTICULAR PURPOSE.  See the GNU General Public License for more details.
 #include "GameData.h"
 #include "Messages.h"
 #include "Outfit.h"
+#include "Phrase.h"
 #include "PlayerInfo.h"
 #include "Ship.h"
 #include "UI.h"
@@ -154,16 +155,16 @@ void MissionAction::Load(const DataNode &node, const string &missionName)
 			if(child.Size() >= 3)
 				paymentMultiplier += child.Value(2);
 		}
-		else if(key == "give ship")
-        {
-            shipModel = GameData::Ships().Get(child.Token(1));
-            if(child.Size() == 2)
-                shipName = GameData::Phrases().Get("civilian")->Get();
-            else if(child.Size() == 3)
-                shipName = child.Value(2);
-            else if(child.Size() >= 4 && (child.Token(2) == "random"))
-                shipName = GameData::Phrases().Get(child.Token(3))->Get();
-        }
+		else if(key == "give ship" && hasValue)
+		{
+			shipModel = GameData::Ships().Get(child.Token(1));
+			if(child.Size() == 2)
+				shipPhrase =  "civilian";
+			else if(child.Size() == 3)
+				shipName = child.Token(2);
+			else if(child.Size() >= 4 && (child.Token(2) == "random"))
+				shipPhrase = child.Token(3);
+		}
 		else if(key == "event" && hasValue)
 		{
 			int days = (child.Size() >= 3 ? child.Value(2) : 0);
@@ -215,8 +216,8 @@ void MissionAction::Save(DataWriter &out) const
 			out.Write("outfit", it.first->Name(), it.second);
 		if(payment)
 			out.Write("payment", payment);
-		if(!shipName.empty())
-			out.Write("give ship", shipModel, shipName);
+		if(shipModel && !shipName.empty())
+			out.Write("give ship", shipModel->ModelName(), shipName);
 		for(const auto &it : events)
 			out.Write("event", it.first, it.second);
 		for(const auto &name : fail)
@@ -308,8 +309,8 @@ void MissionAction::Do(PlayerInfo &player, UI *ui, const System *destination) co
 	if(payment)
 		player.Accounts().AddCredits(payment);
 	
-	if(!shipName.empty())
-		player.GiveShip(shipModel, shipName);
+	if(shipModel && !shipName.empty())
+		player.GiveShip(shipModel, shipName, ui);
 	
 	for(const auto &it : events)
 		player.AddEvent(*GameData::Events().Get(it.first), player.GetDate() + it.second);
@@ -341,6 +342,10 @@ MissionAction MissionAction::Instantiate(map<string, string> &subs, int jumps, i
 	result.events = events;
 	result.gifts = gifts;
 	result.payment = payment + (jumps + 1) * payload * paymentMultiplier;
+	result.shipModel = shipModel;
+	// If there is no specific ship name of a gifted ship, get a random one.
+	result.shipName = shipName.empty() ? GameData::Phrases().Get(shipPhrase)->Get() : shipName;
+	
 	// Fill in the payment amount if this is the "complete" action (which comes
 	// before all the others in the list).
 	if(trigger == "complete" || result.payment)
