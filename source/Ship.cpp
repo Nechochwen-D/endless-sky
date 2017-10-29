@@ -2344,7 +2344,7 @@ int Ship::TakeDamage(const Projectile &projectile, bool isBlast)
 	if(!isBlast && projectile.GetGovernment() && !projectile.GetGovernment()->IsEnemy(government)
 		&& (((Shields() < .9 || Hull() < .9 || !personality.IsForbearing())
 		&& !personality.IsPacifist() && weapon.DoesDamage())
-		|| (crewInjured >= 1. || toxinVolume > 0.))
+		|| (crewInjured >= 1. || toxinVolume > 0.)))
 		type |= ShipEvent::PROVOKE;
 	
 	return type;
